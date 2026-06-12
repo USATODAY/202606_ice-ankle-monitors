@@ -1,0 +1,334 @@
+---
+title: "ICE ankle monitors data trends"
+author: "Ignacio Calderon, USA TODAY"
+date: "2026-06-12"
+output:
+  html_document:
+    theme: united
+    highlight: zenburn
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(janitor)
+library(sf)
+library(tmap)
+library(scales)
+library(DT)
+
+rm(list = ls())
+
+knitr::opts_chunk$set(warning = F, message = F)
+
+```
+
+## Intro
+
+As of early April 2026, there were roughly 60,000 people on immigration detention, but an even larger group of people is on Immigration and Customs Enforcement's Alternatives to Detention program.
+
+As part of [USA TODAY's immigration tracker](https://data.usatoday.com/projects/dhs-immigration-enforcement-tracker/), we compiled every spreadsheet available on the [Wayback Machine’s](https://web.archive.org/web/20260000000000*/https://www.ice.gov/detain/detention-management) archive of the ICE website going back to 2021.
+
+Here are the trends we found in the use of the alternatives to detention program by ICE's Areas of Responsibilities.
+
+## Findings
+
+- As of early April, there were over 46,000 people on ankle monitors, as part of the Alternatives to Detention program. That is higher than any other time as far back as our records go.
+- The use of ankle monitors was once more common, but the technology was replaced with a phone app, SmartLINK, in recent years. Since 2025, however, ankle monitors started to increase in its share from the total number of people on the program, going from an average of 10% in 2024, to 26% in April 4, 2026, the latest available snapshot.
+- The use of the ankle monitors varies widely throughout the country but the top four regions with the highest use are all based around southwest border states: Harlingen, Phoenix, El Paso, and Dallas. In all these, at least two-thirds of people on the program were on ankle monitors in April.
+- On the other hand, Chicago, San Francisco, New York and Seattle were among the regions with the lowest use, between 10% and 20%.
+- Nationally, for every person in ICE detention, there's almost 3 in the alternatives to detention program, as of early April. In some of the regions by the southwest border, the pattern is flipped, with more people in detention than outside. On the other hand, the New York area has about 36 people in alternatives to detention for every detained person -- by far the highest ratio. In all, there's almost a quarter million people under ICE watch, both from detention and the alternative program.
+
+Scroll below for some charts, tables, and more details about how we processed the data.
+
+## Data processing
+
+ICE publishes [detention data](https://www.ice.gov/detain/detention-management), including alternatives to detention, roughly every two weeks. For historical data, we retrieved over 100 spreadsheets from archived versions of the ICE website.
+
+The data includes a breakdown of the number of people by ICE Area of Responsibility (AOR) and by technology. Ankle monitors and SmartLINK are the biggest and the ones we focused on -- the rest which have not appeared consistently since 2021 like telephonic reporting/voice ID and VeriWatch/wrist-worn devices were grouped in "Other."
+
+Not every file was included in the timeseries, however. The spreadsheets, at times, contain errors including typos and missing information. Files that didn't meet our quality checks were removed.
+
+For example, the Alternatives to Detention breakdown by AOR we pull from the ICE spreadsheets typically start like this:
+
+```{r image1, echo=FALSE, out.width="30%", fig.align="center", fig.cap="Screenshot from the ‘ATD FY26 YTD’ sheet from the file published April 9, 2026."}
+knitr::include_graphics("inputs/screenshots/atd_sample1.png")
+```
+
+The table's header contains the data's timestamp (which is not the same as the date of when the file was released). Sometimes, like in the file published on Sept. 15, 2022, the data was added but the date wasn't. Without a date, we can't place the numbers on the timeseries.
+
+```{r image2, echo=FALSE, out.width="60%", fig.align="center", fig.cap="Screenshot from the file published Sept. 15, 2022."}
+knitr::include_graphics("inputs/screenshots/atd_sample2.png")
+```
+
+Another example. The file from Jan. 20, 2022 has an ATD header that says data is from "01/15/2021" -- over a year earlier. Most of the timestamps we use for other variables we compile in our immigration tracker are found on the "Footnotes" sheet. In this specific file, those other variables are dated to mid January 2022 -- a lot closer to when the data was published. While there's always a lag between the publish date and the data timestamp (different variables can have slightly different dates) a difference of a year or several months is likely an error either from a typo on the header or the incorrect data was pulled for the report. Files like this were excluded.
+
+On files starting FY2023, there's not only an ATD breakdown by AOR, but there's also an aggregated version of the table by technology (which also includes tech costs). Notice that this smaller table also contains the timestamp but on the footer, which like the other variable dates, can be used for cross checking the ATD header.
+
+```{r image3, echo=FALSE, out.width="30%", fig.align="center", fig.cap="Screenshot from the ‘ATD FY26 YTD’ sheet from the file published April 9, 2026."}
+knitr::include_graphics("inputs/screenshots/atd_sample3.png")
+```
+
+Based on these types of formatting inconsistencies, we applied the following 'rules' for the defined scenarios in our code to systematically check the quality of the raw spreadsheets we compiled.
+
+- If the ATD header date is within 30 days of the median timestamp from the other variables we collected (book-ins, removals, detained population),
+  - and an aggregated table exists and it's footer date matches the header, the header date is good to use.
+  - and an aggregated table exists but it's footer doesn't match the header, but the footer date is also within 30 days of the median timestamp, go with the footer date instead.
+  - and an aggregated table exists but it's footer doesn't match the header and the footer date is not within 30 days of the median, there's no way to verify the header or footer so the data from this file can't be used.
+  - and an aggregated table is not present, the validation of the header against the median timestamp is still good.
+- If the header is not within 30 days of the median timestamp of the other variables,
+  - but an aggregated table exists and it's footer date is within 30 days of the median, use the footer date instead.
+  - and an aggregated table is not present, there's not a valid date to use so the data from this file can't be used.
+
+This ranking/filtering process reduces the number of files used in our timeseries but it provides a more reliable subset. 
+
+Throughout the fiscal year, ICE also revises their numbers and sometimes the agency publishes a file that has the same data timestamp of a previous file -- we read these as a 'correction' of an earlier file so in these cases we keep the most recently published version.
+
+At last, two more files that don't fall in the categories described above were manually excluded. The data for July 16, 2022 has 14,901 people with ankle monitors, which continues a smooth downward trajectory. The file published Aug. 31, 2022, however shows a sudden spike to 27,662 a month later (header timestamp: 2022-08-13). The subsequent file published is the one without a date from the earlier example (xx/xx/2022) which was removed. The one after, published Sept. 29, 2022, has another big spike at 40,970. The ankle monitor numbers then drop again to continue the downward trend that was happening before the Aug. spike.
+
+That spike may have been an error with the ATD technology categories. For example, just weeks later, a release with data from Nov. 19, 2022 had an even larger number (56,805 for ankle monitors). The data release that followed, also had data from Nov. 19, 2022 but it changed the ankle monitors to 7,905 which is on par with the trend it was headed on. That difference of 48,900 that was removed from ankle monitors, was added to the "No technology" category so the total number of people on ATD stayed the same. As mentioned earlier, if a data release has the date of a previous file, we take this as a correction, so the newer was kept from these. Reference screenshots of these below.
+
+```{r image4, echo=FALSE, out.width="60%", fig.align="center", fig.cap="Screenshot from the file published on Nov. 28, 2022."}
+knitr::include_graphics("inputs/screenshots/atd_sample4.png")
+```
+
+```{r image5, echo=FALSE, out.width="60%", fig.align="center", fig.cap="Screenshot from the file published on Dec. 7, 2022."}
+knitr::include_graphics("inputs/screenshots/atd_sample5.png")
+```
+
+With all this processing, our data closely matches the [data compiled by Austin Kocher](https://austinkocher.substack.com/p/ices-delayed-detention-data-is-out), a researcher and professor at Syracuse University who studies the immigration system.  
+
+## Stats
+
+Data processing aside, here's what we got from the cleaned data:
+
+```{r c1}
+# import national timeseries for Alternatives to Detention (ATD) 
+# and the breakdown by Area of Responsibility (AOR)
+atd_seq <- read_csv("inputs/processed/atd_seq.csv") %>% rename(atd_total = total)
+atd_by_aor_seq <- read_csv("inputs/processed/atd_by_aor_seq.csv") %>% rename(atd_total = total)
+```
+
+```{r c2, echo = FALSE}
+atd_seq %>%
+  select(date, smartlink, ankle_monitor, other) %>%
+  pivot_longer(cols = c(smartlink, ankle_monitor, other), 
+               names_to = "tech", values_to = "count") %>%
+  ggplot(aes(x = date, y = count, fill = tech, region = tech)) +
+  geom_area() +
+  labs(title = "Number of people on ICE's alternative to detention program",
+       x = '', y = '') +
+  # show all years
+  scale_x_date(breaks = seq(as.Date("2021-01-01"), as.Date("2026-01-01"), by = "1 year"), date_labels = "%Y") +
+  # don't use scientific notation
+  scale_y_continuous(labels = comma, limits = c(0, 400000)) + 
+  theme_linedraw()
+```
+
+```{r c3, echo = FALSE}
+atd_seq %>%
+  select(date, smartlink_pct, ankle_monitor_pct, other_pct) %>%
+  pivot_longer(cols = c(smartlink_pct, ankle_monitor_pct, other_pct), 
+               names_to = "tech", values_to = "pct") %>%
+  mutate(pct = pct * 100) %>%
+  ggplot(aes(x = date, y = pct, color = tech)) +
+  geom_line() +
+  ylim(0, 100) +
+  labs(title = "Breakdown of people by tracking technology",
+       x = '', y = 'Percentage') +
+  # show all years
+  scale_x_date(breaks = seq(as.Date("2021-01-01"), as.Date("2026-01-01"), by = "1 year"), date_labels = "%Y") +
+  theme_linedraw()
+```
+
+```{r c4, echo = FALSE}
+atd_seq %>%
+  ggplot(aes(x = date, y = ankle_monitor)) +
+  geom_line() +
+  labs(title = "Number of people on ICE ankle monitors",
+       x = '', y = '') +
+  # show all years
+  scale_x_date(breaks = seq(as.Date("2021-01-01"), as.Date("2026-01-01"), by = "1 year"), date_labels = "%Y") +
+  # don't use scientific notation
+  scale_y_continuous(labels = comma, limits = c(0, 50000)) + 
+  theme_linedraw()
+```
+
+Now, on to specific stats. First, at a national level.
+
+To gauge the changes in the second Trump administration, we need a reference. We tested using the snapshot from early Jan. 2025 before the term started, but since the data fluctuates, we opted for averaging all the available snapshots in 2024 as a more stable baseline.
+
+In 2024, about 10% of people on ATD had ankle monitors, on average. In April 2026 that jumped to 26%:
+
+```{r c5}
+# aggregate snapshots from 2024 for our benchmark
+atd_seq %>%
+  mutate(year = year(date)) %>%
+  filter(year == 2024) %>%
+  group_by(year) %>%
+  summarise(ankle_monitor = mean(ankle_monitor),
+            ankle_monitor_pct = mean(ankle_monitor_pct),
+            smartlink = mean(smartlink),
+            smartlink_pct = mean(smartlink_pct),
+            atd_total = mean(atd_total))
+
+# now compare to the most recent snapshot
+atd_seq %>%
+  filter(date == "2026-04-04") %>%
+  select(date, ankle_monitor, ankle_monitor_pct, smartlink, smartlink_pct, atd_total)
+```
+
+The current 46,302 people on detention is the highest from this timeseries:
+
+```{r c6}
+# sort from biggest to smallest
+atd_seq %>%
+  arrange(desc(ankle_monitor)) %>%
+  select(date, ankle_monitor) %>%
+  head(5)
+```
+
+Now, looking at how numbers by Areas of Responsibility stack in the latest snapshot (April 4, 2026). The top four regions by ankle monitor use are based in southwest border states. Note, the country is divided into 25 AORs and these cover vastly different areas so we are comparing the percentage rather than the raw amounts.
+
+```{r c7}
+# grab most recent snapshot by AOR
+atd_by_aor_seq_apr_2026 <- atd_by_aor_seq %>%
+  filter(date == "2026-04-04")
+
+# display this in a table
+atd_by_aor_seq_apr_2026 %>%
+  arrange(desc(ankle_monitor_pct)) %>% 
+  select(area, ankle_monitor_pct, ankle_monitor, atd_total) %>%
+  datatable(caption = "Table 1. Data as of 2026-04-04")
+```
+
+We have a ranking of the current highest places, but we can also check which ones increased the most compared to the 2024 average baseline. We can do this by comparing the difference in percentage points. For example, the Phoenix AOR increased from 18% of people using ankle monitors in that region, to 78%. That's an increase in 60 percentage points.
+
+Similar border regions stand out in the top, but worth noting the Washington DC area had a big increase too: from 11% to 65%.
+
+```{r c8}
+# aggregated again to 2024 avg but by region
+atd_by_aor_seq_2024 <- atd_by_aor_seq %>%
+  mutate(year = year(date)) %>%
+  filter(year == 2024) %>%
+  group_by(year, area) %>%
+  summarise(ankle_monitor_2024 = mean(ankle_monitor),
+            ankle_monitor_pct_2024 = mean(ankle_monitor_pct),
+            atd_total_2024 = mean(atd_total)) %>%
+  ungroup() %>%
+  select(-year)
+
+# merge that to the recent snapshot
+atd_by_aor_seq_comp <- atd_by_aor_seq_apr_2026 %>%
+  select(area, ankle_monitor_apr_2026 = ankle_monitor,
+         ankle_monitor_pct_apr_2026 = ankle_monitor_pct,
+         atd_total_apr_2026 = atd_total) %>%
+  left_join(atd_by_aor_seq_2024, by = "area") %>%
+  mutate(ankle_monitor_pct_point_diff = ankle_monitor_pct_apr_2026 - ankle_monitor_pct_2024) %>%
+  mutate(ankle_monitor_pct_point_diff = round(ankle_monitor_pct_point_diff, 3),
+         ankle_monitor_pct_2024 = round(ankle_monitor_pct_2024, 3),
+         ankle_monitor_2024 = round(ankle_monitor_2024),
+         atd_total_2024 = round(atd_total_2024))
+
+# display this in a table
+atd_by_aor_seq_comp %>%
+  arrange(desc(ankle_monitor_pct_point_diff)) %>% 
+  select(area, ankle_monitor_pct_point_diff, ankle_monitor_pct_apr_2026, ankle_monitor_pct_2024) %>%
+  datatable(caption = "Table 2. Data for 2024 is the average across available snapshots.")
+```
+
+We can also map the areas of responsibility. We used shapefiles from the [Data Deportation Project](https://deportationdata.org/index.html) found [here](https://deportationdata.org/data/processed/ice.html#field-offices-and-areas-of-responsibility) along with more background [here](https://deportationdata.org/docs/ice/codebook-offices.html).
+
+```{r c9}
+# import it and normalize some names to match our tabular data
+aor_geom <- st_read("inputs/deportation-data-project/ice-aor-shp/ice-aor-shp.shp",
+                    quiet = TRUE) %>%
+  drop_na(offc_nm) %>%
+  select(area = aor_nam, geometry) %>%
+  mutate(area = tolower(area)) %>%
+  mutate(area = gsub("new york city", "new york", area),
+         area = gsub("washington", "washington dc", area))
+
+atd_by_aor_seq_comp_geom <- atd_by_aor_seq_comp %>%
+  left_join(aor_geom, by = "area") %>%
+  st_as_sf() %>%
+  st_make_valid()
+
+# now plot it by percentage ankle monitor use
+tmap_mode("view") # tmap_mode("plot") for static
+atd_by_aor_seq_comp_geom %>%
+  select(area_office_name = area,
+         ankle_monitor_pct = ankle_monitor_pct_apr_2026,
+         ankle_monitor = ankle_monitor_apr_2026,
+         atd_total = atd_total_apr_2026) %>%
+  mutate(ankle_monitor_pct = ankle_monitor_pct * 100) %>%
+  tm_shape() + 
+  tm_polygons(fill = "ankle_monitor_pct", fill_alpha = 0.7,
+              title = "Percent on ankle monitors (Apr 2026)",
+              breaks = c(0, 20, 40, 65, 80)) +
+  tm_borders(lwd = 0.01, col = "black")
+```
+
+## Detention vs ATD
+
+We can also use detention data by facility and aggregate it by AOR to compare to ATD by region. Using with the most recent snapshot again, though this other sheet is has a timestamp that's two days earlier than the ATD data. 
+
+Note, the facilities sheet has 3-letter abbreviations for the areas of responsibility. We manually made a key to match them to the full names.
+
+```{r c10}
+# make an AOR key
+aor_key <- as.tibble(unique(atd_by_aor_seq$area)) %>%
+  rename(area = value) %>%
+  mutate(abbreviation = case_when(
+    area == "atlanta" ~ "ATL", area == "baltimore" ~ "BAL",
+    area == "boston" ~ "BOS", area == "buffalo" ~ "BUF",
+    area == "chicago" ~ "CHI", area == "dallas" ~ "DAL",
+    area == "denver" ~ "DEN", area == "detroit" ~ "DET",
+    area == "el paso" ~ "ELP", area == "harlingen" ~ "HLG",
+    area == "houston" ~ "HOU", area == "los angeles" ~ "LOS", 
+    area == "miami" ~ "MIA", area == "new orleans" ~ "NOL",
+    area == "new york" ~ "NYC", area == "newark" ~ "NEW",
+    area == "philadelphia" ~ "PHI", area == "phoenix" ~ "PHO", 
+    area == "salt lake city" ~ "SLC", area == "san antonio" ~ "SNA", 
+    area == "san diego" ~ "SND", area == "san francisco" ~ "SFR", 
+    area == "seattle" ~ "SEA", area == "st paul" ~ "SPM", 
+    area == "washington dc" ~ "WAS"))
+
+# import latest facility data
+facilities <- read_xlsx("inputs/raw_snapshots/FY26_detentionStats_04092026.xlsx",
+                        sheet = "Facilities FY26", skip = 9) %>%
+  clean_names()
+
+# clean up columns and join key
+facilities <- facilities %>%
+  mutate(facility_pop = round(female_crim + female_non_crim + male_crim + male_non_crim),
+         date = ymd("2026-04-02")) %>%
+  left_join(aor_key, by = c("aor" = "abbreviation")) %>%
+  select(date, name, address, city, zip, state, aor_abb = aor, area, facility_pop)
+
+# now aggregate by AOR
+det_by_aor_apr_2026 <- facilities %>%
+  group_by(area) %>%
+  summarise(detention_pop = sum(facility_pop, na.rm = T))
+```
+
+Now we can merge that to the April 2026 ATD data. Again, note that detention data is from 2026-04-02 and the ATD data is from 2026-04-04 but they were published in the same file.
+
+Nationally, for every person in detention there's almost 3 in ATD. The table below includes the ratio by AOR, which varies. Some of the AORs by the southwest border which had a very high percentage of ankle monitor use, also have more people in detention than ATD (the opposite of most areas).
+
+```{r c11}
+atd_det_by_aor_apr_2026 <- atd_by_aor_seq_apr_2026 %>%
+  left_join(det_by_aor_apr_2026, by = "area") %>%
+  mutate(atd_to_det_ratio = round(atd_total/detention_pop, 2))
+
+# national ratio for reference: 2.73: 1
+round(sum(atd_det_by_aor_apr_2026$atd_total, na.rm = T)/sum(atd_det_by_aor_apr_2026$detention_pop, na.rm = T), 2)
+
+# display aor ranking in a table
+atd_det_by_aor_apr_2026 %>%
+  arrange(atd_to_det_ratio) %>% 
+  select(area, atd_to_det_ratio, detention_pop, atd_total, ankle_monitor_pct) %>%
+  datatable(caption = "Table 3. Data as of early April 2026")
+```
